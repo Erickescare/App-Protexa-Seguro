@@ -1,0 +1,65 @@
+{
+  "name": "Protexa Seguro App",
+  "short_name": "Protexa",
+  "description": "Aplicación de Recorridos de Seguridad",
+  "version": "1.0.0",
+  "start_url": "/app-protexa-seguro/",
+  "scope": "/app-protexa-seguro/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#2563eb",
+  "background_color": "#ffffff",
+  "lang": "es-MX",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72'><rect width='72' height='72' fill='%232563eb'/><text x='36' y='45' font-size='32' text-anchor='middle' fill='white'>🛡️</text></svg>",
+      "sizes": "72x72",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect width='96' height='96' fill='%232563eb'/><text x='48' y='60' font-size='48' text-anchor='middle' fill='white'>🛡️</text></svg>",
+      "sizes": "96x96",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%232563eb'/><text x='96' y='120' font-size='96' text-anchor='middle' fill='white'>🛡️</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%232563eb'/><text x='256' y='320' font-size='256' text-anchor='middle' fill='white'>🛡️</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nuevo Recorrido",
+      "short_name": "Recorrido",
+      "description": "Iniciar un nuevo recorrido de seguridad",
+      "url": "/app-protexa-seguro/dashboard.php?action=new",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect width='96' height='96' fill='%232563eb'/><text x='48' y='60' font-size='48' text-anchor='middle' fill='white'>📋</text></svg>",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Emergencia",
+      "short_name": "Emergencia",
+      "description": "Reporte de emergencia",
+      "url": "/app-protexa-seguro/dashboard.php?action=emergency",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect width='96' height='96' fill='%23dc2626'/><text x='48' y='60' font-size='48' text-anchor='middle' fill='white'>🚨</text></svg>",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ],
+  "categories": ["productivity", "business", "utilities"]
+}
