@@ -1,4 +1,4 @@
-// app-protexa-seguro/assets/js/app.js
+// app-protexa-seguro/assets/js/app.js - VERSIÓN COMPLETA
 
 /**
  * Protexa Seguro App - JavaScript Principal
@@ -8,7 +8,7 @@
 class ProtexaApp {
     constructor() {
         this.currentStep = 1;
-        this.totalSteps = 7;
+        this.totalSteps = window.tourData ? window.tourData.totalSteps : 7;
         this.tourData = {};
         this.photos = {};
         this.isDraft = false;
@@ -183,7 +183,7 @@ class ProtexaApp {
     }
 
     validateCurrentStep() {
-        const currentStepElement = document.querySelector(`.wizard-step:nth-child(${this.currentStep})`);
+        const currentStepElement = document.querySelector(`.wizard-step[data-step="${this.currentStep}"]`);
         if (!currentStepElement) return true;
 
         const requiredInputs = currentStepElement.querySelectorAll('input[required], select[required]');
@@ -239,17 +239,11 @@ class ProtexaApp {
     }
 
     getCurrentStepData() {
-        const currentStepElement = document.querySelector(`.wizard-step:nth-child(${this.currentStep})`);
+        const currentStepElement = document.querySelector(`.wizard-step[data-step="${this.currentStep}"]`);
         if (!currentStepElement) return {};
 
         const data = {};
         
-        // Get form data
-        const formData = new FormData(currentStepElement.querySelector('form') || currentStepElement);
-        for (let [key, value] of formData.entries()) {
-            data[key] = value;
-        }
-
         // Get radio button values
         const radioInputs = currentStepElement.querySelectorAll('input[type="radio"]:checked');
         radioInputs.forEach(radio => {
@@ -259,7 +253,9 @@ class ProtexaApp {
         // Get textarea values
         const textareas = currentStepElement.querySelectorAll('textarea');
         textareas.forEach(textarea => {
-            data[textarea.name] = textarea.value;
+            if (textarea.value.trim()) {
+                data[textarea.name] = textarea.value;
+            }
         });
 
         return data;
@@ -275,7 +271,7 @@ class ProtexaApp {
                 this.isDraft = true;
                 
                 // Show draft notification
-                this.showNotification('Se cargó un borrador guardado anteriormente', 'info');
+                showToast('Se cargó un borrador guardado anteriormente', 'info');
                 
                 // Restore form data
                 this.restoreFormData();
@@ -297,16 +293,156 @@ class ProtexaApp {
         localStorage.setItem('protexa_tour_draft', JSON.stringify(draftData));
     }
 
-    saveDraft() {
-        this.saveCurrentStepData();
-        this.saveDraftToStorage();
+    async saveDraft() {
+        console.log('🔄 Iniciando guardado de borrador...');
         
-        this.showNotification('Borrador guardado correctamente', 'success');
-        
-        // Send to server if online
-        if (navigator.onLine) {
-            this.sendDraftToServer();
+        if (!window.tourData || !window.tourData.id) {
+            console.error('❌ No se encontró tour_id');
+            showToast('Error: No se pudo identificar el recorrido', 'error');
+            return false;
         }
+        
+        const tourId = window.tourData.id;
+        console.log(`📝 Guardando borrador para tour_id: ${tourId}`);
+        
+        // Mostrar loading en el botón
+        const saveBtn = document.querySelector('.nav-save-draft');
+        if (saveBtn) {
+            this.showButtonLoading(saveBtn);
+        }
+        
+        try {
+            // Recopilar datos del formulario actual
+            this.saveCurrentStepData();
+            const formData = this.collectFormData();
+            console.log('📊 Datos recopilados:', formData);
+            
+            // Preparar payload para la API
+            const payload = {
+                tour_id: tourId,
+                tourData: formData,
+                isDraft: true,
+                currentStep: this.currentStep,
+                timestamp: new Date().toISOString()
+            };
+            
+            console.log('📤 Enviando payload:', payload);
+            
+            // Hacer request a la API
+            const response = await fetch('api/save-progress.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload)
+            });
+            
+            console.log(`📡 Response status: ${response.status}`);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ Error response:', errorText);
+                
+                if (response.status === 401) {
+                    showToast('Sesión expirada. Redirigiendo al login...', 'warning');
+                    setTimeout(() => {
+                        window.location.href = 'index.php';
+                    }, 2000);
+                    return false;
+                }
+                
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            
+            const result = await response.json();
+            console.log('✅ Respuesta exitosa:', result);
+            
+            if (result.success) {
+                showToast(result.message || 'Borrador guardado correctamente', 'success');
+                
+                // Guardar también en localStorage como backup
+                this.saveDraftToStorage();
+                
+                return true;
+            } else {
+                throw new Error(result.message || 'Error desconocido al guardar');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error guardando borrador:', error);
+            
+            // Guardar en localStorage como fallback
+            this.saveDraftToStorage();
+            
+            if (navigator.onLine) {
+                showToast('Error al guardar en servidor. Guardado localmente.', 'warning');
+            } else {
+                showToast('Sin conexión. Guardado localmente.', 'info');
+            }
+            
+            return false;
+            
+        } finally {
+            // Ocultar loading
+            if (saveBtn) {
+                this.hideButtonLoading(saveBtn);
+            }
+        }
+    }
+
+    collectFormData() {
+        const formData = {};
+        const form = document.getElementById('tour-form');
+        
+        if (!form) {
+            console.warn('⚠️ No se encontró el formulario');
+            return formData;
+        }
+        
+        // Obtener todas las respuestas de radio buttons
+        const radioButtons = form.querySelectorAll('input[type="radio"]:checked');
+        radioButtons.forEach(radio => {
+            const stepKey = `step_${this.currentStep}`;
+            if (!formData[stepKey]) {
+                formData[stepKey] = {};
+            }
+            formData[stepKey][radio.name] = radio.value;
+        });
+        
+        // Obtener comentarios de categorías
+        const textareas = form.querySelectorAll('textarea[name^="category_comments"]');
+        textareas.forEach(textarea => {
+            if (textarea.value.trim()) {
+                const stepKey = `step_${this.currentStep}`;
+                if (!formData[stepKey]) {
+                    formData[stepKey] = {};
+                }
+                formData[stepKey][textarea.name] = textarea.value;
+            }
+        });
+        
+        // Obtener comentarios finales
+        const finalComments = form.querySelector('textarea[name="final_comments"]');
+        if (finalComments && finalComments.value.trim()) {
+            formData['final_comments'] = finalComments.value;
+        }
+        
+        // Obtener prioridad crítica
+        const priorityLevel = form.querySelector('input[name="priority_level"]:checked');
+        if (priorityLevel) {
+            formData['priority_level'] = priorityLevel.value;
+        }
+        
+        // Obtener descripción crítica
+        const criticalDesc = form.querySelector('textarea[name="critical_description"]');
+        if (criticalDesc && criticalDesc.value.trim()) {
+            formData['critical_description'] = criticalDesc.value;
+        }
+        
+        console.log('📋 Form data collected:', formData);
+        return formData;
     }
 
     restoreFormData() {
@@ -341,15 +477,15 @@ class ProtexaApp {
 
     handlePhotoUpload(input) {
         const files = Array.from(input.files);
-        const questionId = input.dataset.questionId || `step_${this.currentStep}`;
+        const categoryId = input.dataset.categoryId || `step_${this.currentStep}`;
         
-        if (!this.photos[questionId]) {
-            this.photos[questionId] = [];
+        if (!this.photos[categoryId]) {
+            this.photos[categoryId] = [];
         }
 
         files.forEach(file => {
             if (this.validatePhoto(file)) {
-                this.processPhoto(file, questionId);
+                this.processPhoto(file, categoryId);
             }
         });
     }
@@ -359,19 +495,19 @@ class ProtexaApp {
         const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
         
         if (!allowedTypes.includes(file.type)) {
-            this.showNotification('Solo se permiten imágenes JPG, JPEG y PNG', 'error');
+            showToast('Solo se permiten imágenes JPG, JPEG y PNG', 'error');
             return false;
         }
         
         if (file.size > maxSize) {
-            this.showNotification('La imagen no puede ser mayor a 5MB', 'error');
+            showToast('La imagen no puede ser mayor a 5MB', 'error');
             return false;
         }
         
         return true;
     }
 
-    processPhoto(file, questionId) {
+    processPhoto(file, categoryId) {
         const reader = new FileReader();
         
         reader.onload = (e) => {
@@ -384,8 +520,8 @@ class ProtexaApp {
                 timestamp: new Date().toISOString()
             };
             
-            this.photos[questionId].push(photoData);
-            this.updatePhotoPreview(questionId);
+            this.photos[categoryId].push(photoData);
+            this.updatePhotoPreview(categoryId);
             this.saveDraftToStorage();
         };
         
@@ -396,38 +532,38 @@ class ProtexaApp {
         return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
 
-    updatePhotoPreview(questionId) {
-        const previewContainer = document.querySelector(`[data-question-id="${questionId}"] .photo-preview`);
+    updatePhotoPreview(categoryId) {
+        const previewContainer = document.querySelector(`[data-category-id="${categoryId}"] .photo-preview`);
         if (!previewContainer) return;
 
         previewContainer.innerHTML = '';
         
-        const photos = this.photos[questionId] || [];
+        const photos = this.photos[categoryId] || [];
         photos.forEach(photo => {
-            const previewItem = this.createPhotoPreviewElement(photo, questionId);
+            const previewItem = this.createPhotoPreviewElement(photo, categoryId);
             previewContainer.appendChild(previewItem);
         });
     }
 
-    createPhotoPreviewElement(photo, questionId) {
+    createPhotoPreviewElement(photo, categoryId) {
         const div = document.createElement('div');
         div.className = 'photo-preview-item';
         div.innerHTML = `
             <img src="${photo.dataUrl}" alt="${photo.name}">
             <button type="button" class="photo-preview-remove" 
                     data-photo-id="${photo.id}" 
-                    data-question-id="${questionId}">×</button>
+                    data-category-id="${categoryId}">×</button>
         `;
         return div;
     }
 
     removePhoto(button) {
         const photoId = button.dataset.photoId;
-        const questionId = button.dataset.questionId;
+        const categoryId = button.dataset.categoryId;
         
-        if (this.photos[questionId]) {
-            this.photos[questionId] = this.photos[questionId].filter(photo => photo.id !== photoId);
-            this.updatePhotoPreview(questionId);
+        if (this.photos[categoryId]) {
+            this.photos[categoryId] = this.photos[categoryId].filter(photo => photo.id !== photoId);
+            this.updatePhotoPreview(categoryId);
             this.saveDraftToStorage();
         }
     }
@@ -467,11 +603,15 @@ class ProtexaApp {
 
     // Auto-save functionality
     setupAutoSave() {
+        let lastSaveData = null;
         setInterval(() => {
-            if (this.isDraft && navigator.onLine) {
-                this.sendDraftToServer();
+            const currentData = JSON.stringify(this.collectFormData());
+            if (currentData !== lastSaveData && currentData !== '{}') {
+                console.log('🔄 Auto-guardado iniciado...');
+                this.saveDraft();
+                lastSaveData = currentData;
             }
-        }, 30000); // Auto-save every 30 seconds
+        }, 120000); // 2 minutos
     }
 
     async sendDraftToServer() {
@@ -481,7 +621,9 @@ class ProtexaApp {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify({
+                    tour_id: window.tourData.id,
                     tourData: this.tourData,
                     photos: this.photos,
                     currentStep: this.currentStep,
@@ -510,12 +652,13 @@ class ProtexaApp {
                     headers: {
                         'Content-Type': 'application/json',
                     },
+                    credentials: 'same-origin',
                     body: JSON.stringify(data)
                 });
 
                 if (response.ok) {
                     localStorage.removeItem('protexa_pending_sync');
-                    this.showNotification('Datos sincronizados correctamente', 'success');
+                    showToast('Datos sincronizados correctamente', 'success');
                 }
             } catch (error) {
                 console.error('Error syncing data:', error);
@@ -528,7 +671,7 @@ class ProtexaApp {
         this.saveCurrentStepData();
         
         if (!this.validateAllSteps()) {
-            this.showNotification('Por favor completa todas las secciones requeridas', 'error');
+            showToast('Por favor completa todas las secciones requeridas', 'error');
             return;
         }
 
@@ -539,29 +682,38 @@ class ProtexaApp {
             const formData = new FormData();
             
             // Add tour data
+            formData.append('tour_id', window.tourData.id);
             formData.append('tourData', JSON.stringify(this.tourData));
             formData.append('isDraft', 'false');
             
             // Add photos
-            Object.keys(this.photos).forEach(questionId => {
-                this.photos[questionId].forEach((photo, index) => {
-                    formData.append(`photos[${questionId}][${index}]`, photo.file);
+            Object.keys(this.photos).forEach(categoryId => {
+                this.photos[categoryId].forEach((photo, index) => {
+                    if (photo.file) {
+                        formData.append(`photos[${categoryId}][${index}]`, photo.file);
+                    }
                 });
             });
 
             const response = await fetch('api/save-progress.php', {
                 method: 'POST',
+                credentials: 'same-origin',
                 body: formData
             });
 
             if (response.ok) {
-                // Clear draft
-                localStorage.removeItem('protexa_tour_draft');
-                
-                // Redirect to success page
-                window.location.href = 'success.php';
+                const result = await response.json();
+                if (result.success) {
+                    // Clear draft
+                    localStorage.removeItem('protexa_tour_draft');
+                    
+                    // Redirect to success page
+                    window.location.href = result.redirect_url || 'success.php';
+                } else {
+                    throw new Error(result.message || 'Error en el servidor');
+                }
             } else {
-                throw new Error('Error submitting tour');
+                throw new Error('Error en la respuesta del servidor');
             }
         } catch (error) {
             console.error('Submission error:', error);
@@ -569,13 +721,14 @@ class ProtexaApp {
             if (!navigator.onLine) {
                 // Save for later sync
                 localStorage.setItem('protexa_pending_sync', JSON.stringify({
+                    tour_id: window.tourData.id,
                     tourData: this.tourData,
                     photos: this.photos,
                     isDraft: false
                 }));
-                this.showNotification('Sin conexión. Se guardará cuando vuelva la conexión.', 'warning');
+                showToast('Sin conexión. Se guardará cuando vuelva la conexión.', 'warning');
             } else {
-                this.showNotification('Error al enviar el recorrido. Inténtalo de nuevo.', 'error');
+                showToast('Error al enviar el recorrido. Inténtalo de nuevo.', 'error');
             }
         } finally {
             this.hideButtonLoading(submitBtn);
@@ -588,25 +741,6 @@ class ProtexaApp {
     }
 
     // UI Helpers
-    showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        notification.className = `notification ${type}`;
-        notification.textContent = message;
-        
-        // Insert at top of main content
-        const main = document.querySelector('main');
-        if (main) {
-            main.insertBefore(notification, main.firstChild);
-        } else {
-            document.body.appendChild(notification);
-        }
-        
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            notification.remove();
-        }, 5000);
-    }
-
     showButtonLoading(button) {
         if (!button) return;
         
@@ -695,7 +829,7 @@ class ProtexaApp {
             <div class="summary-card">
                 <div class="summary-header">
                     <h2>Resumen del Recorrido</h2>
-                    <div class="summary-badge ${this.tourType || 'scheduled'}">${this.tourType === 'emergency' ? 'Emergencia' : 'Programado'}</div>
+                    <div class="summary-badge ${window.tourData.type || 'scheduled'}">${window.tourData.type === 'emergency' ? 'Emergencia' : 'Programado'}</div>
                 </div>
                 
                 <div class="summary-stats">
@@ -897,7 +1031,7 @@ class NetworkHelper {
         if (!navigator.onLine) return false;
         
         try {
-            const response = await fetch('/app-protexa-seguro/api/ping.php', {
+            const response = await fetch('api/ping.php', {
                 method: 'HEAD',
                 cache: 'no-cache'
             });
@@ -919,321 +1053,7 @@ class NetworkHelper {
     }
 }
 
-// Initialize app when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    // Only initialize on recorrido page
-    if (document.querySelector('.wizard-container')) {
-        window.protexaApp = new ProtexaApp();
-    }
-
-    // Initialize PWA features
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/app-protexa-seguro/sw.js')
-            .then(registration => {
-                console.log('SW registered:', registration);
-            })
-            .catch(error => {
-                console.log('SW registration failed:', error);
-            });
-    }
-
-    // Handle beforeinstallprompt
-    let deferredPrompt;
-    window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        
-        // Show install banner after delay
-        setTimeout(() => {
-            showInstallBanner();
-        }, 10000);
-    });
-
-    function showInstallBanner() {
-        if (deferredPrompt && !localStorage.getItem('pwa-dismissed')) {
-            const banner = document.createElement('div');
-            banner.className = 'pwa-install-banner';
-            banner.innerHTML = `
-                <div class="pwa-banner-content">
-                    <p>¡Instala Protexa Seguro para un acceso más rápido!</p>
-                    <div class="pwa-banner-actions">
-                        <button id="install-btn" class="btn btn-primary btn-sm">Instalar</button>
-                        <button id="dismiss-btn" class="btn btn-secondary btn-sm">Ahora no</button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(banner);
-            
-            // Handle install
-            document.getElementById('install-btn').addEventListener('click', async () => {
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                deferredPrompt = null;
-                banner.remove();
-            });
-            
-            // Handle dismiss
-            document.getElementById('dismiss-btn').addEventListener('click', () => {
-                localStorage.setItem('pwa-dismissed', 'true');
-                banner.remove();
-            });
-        }
-    }
-});
-
-// Export for global access
-window.ProtexaApp = ProtexaApp;
-window.CameraHelper = CameraHelper;
-window.StorageHelper = StorageHelper;
-window.FormHelper = FormHelper;
-window.NetworkHelper = NetworkHelper;
-
-// Parte del app.js que maneja el guardado de borradores - VERSIÓN CORREGIDA
-
-// Función para guardar borrador
-async function saveDraft() {
-    console.log('🔄 Iniciando guardado de borrador...');
-    
-    if (!window.tourData || !window.tourData.id) {
-        console.error('❌ No se encontró tour_id');
-        showToast('Error: No se pudo identificar el recorrido', 'error');
-        return false;
-    }
-    
-    const tourId = window.tourData.id;
-    console.log(`📝 Guardando borrador para tour_id: ${tourId}`);
-    
-    // Mostrar loading en el botón
-    const saveBtn = document.querySelector('.nav-save-draft');
-    if (saveBtn) {
-        showButtonLoading(saveBtn);
-    }
-    
-    try {
-        // Recopilar datos del formulario actual
-        const formData = collectFormData();
-        console.log('📊 Datos recopilados:', formData);
-        
-        // Preparar payload para la API
-        const payload = {
-            tour_id: tourId,
-            tourData: formData,
-            isDraft: true,
-            currentStep: window.protexaApp ? window.protexaApp.currentStep : 1,
-            timestamp: new Date().toISOString()
-        };
-        
-        console.log('📤 Enviando payload:', payload);
-        
-        // Hacer request a la API
-        const response = await fetch('api/save-progress.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            credentials: 'same-origin', // Importante para cookies de sesión
-            body: JSON.stringify(payload)
-        });
-        
-        console.log(`📡 Response status: ${response.status}`);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('❌ Error response:', errorText);
-            
-            if (response.status === 401) {
-                showToast('Sesión expirada. Redirigiendo al login...', 'warning');
-                setTimeout(() => {
-                    window.location.href = 'index.php';
-                }, 2000);
-                return false;
-            }
-            
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-        
-        const result = await response.json();
-        console.log('✅ Respuesta exitosa:', result);
-        
-        if (result.success) {
-            showToast(result.message || 'Borrador guardado correctamente', 'success');
-            
-            // Guardar también en localStorage como backup
-            saveToLocalStorage(payload);
-            
-            // Opcional: redirigir a página de confirmación
-            if (result.redirect_url) {
-                setTimeout(() => {
-                    window.location.href = result.redirect_url;
-                }, 1500);
-            }
-            
-            return true;
-        } else {
-            throw new Error(result.message || 'Error desconocido al guardar');
-        }
-        
-    } catch (error) {
-        console.error('❌ Error guardando borrador:', error);
-        
-        // Guardar en localStorage como fallback
-        const fallbackData = {
-            tour_id: tourId,
-            tourData: collectFormData(),
-            isDraft: true,
-            timestamp: new Date().toISOString(),
-            savedOffline: true
-        };
-        
-        saveToLocalStorage(fallbackData);
-        
-        if (navigator.onLine) {
-            showToast('Error al guardar en servidor. Guardado localmente.', 'warning');
-        } else {
-            showToast('Sin conexión. Guardado localmente.', 'info');
-        }
-        
-        return false;
-        
-    } finally {
-        // Ocultar loading
-        if (saveBtn) {
-            hideButtonLoading(saveBtn);
-        }
-    }
-}
-
-// Función para recopilar datos del formulario
-function collectFormData() {
-    const formData = {};
-    const form = document.getElementById('tour-form');
-    
-    if (!form) {
-        console.warn('⚠️ No se encontró el formulario');
-        return formData;
-    }
-    
-    // Obtener todas las respuestas de radio buttons
-    const radioButtons = form.querySelectorAll('input[type="radio"]:checked');
-    radioButtons.forEach(radio => {
-        const stepKey = `step_${getCurrentStep()}`;
-        if (!formData[stepKey]) {
-            formData[stepKey] = {};
-        }
-        formData[stepKey][radio.name] = radio.value;
-    });
-    
-    // Obtener comentarios de categorías
-    const textareas = form.querySelectorAll('textarea[name^="category_comments"]');
-    textareas.forEach(textarea => {
-        if (textarea.value.trim()) {
-            const stepKey = `step_${getCurrentStep()}`;
-            if (!formData[stepKey]) {
-                formData[stepKey] = {};
-            }
-            formData[stepKey][textarea.name] = textarea.value;
-        }
-    });
-    
-    // Obtener comentarios finales
-    const finalComments = form.querySelector('textarea[name="final_comments"]');
-    if (finalComments && finalComments.value.trim()) {
-        formData['final_comments'] = finalComments.value;
-    }
-    
-    // Obtener prioridad crítica
-    const priorityLevel = form.querySelector('input[name="priority_level"]:checked');
-    if (priorityLevel) {
-        formData['priority_level'] = priorityLevel.value;
-    }
-    
-    // Obtener descripción crítica
-    const criticalDesc = form.querySelector('textarea[name="critical_description"]');
-    if (criticalDesc && criticalDesc.value.trim()) {
-        formData['critical_description'] = criticalDesc.value;
-    }
-    
-    console.log('📋 Form data collected:', formData);
-    return formData;
-}
-
-// Función para obtener el paso actual
-function getCurrentStep() {
-    if (window.protexaApp && window.protexaApp.currentStep) {
-        return window.protexaApp.currentStep;
-    }
-    
-    // Fallback: encontrar el paso visible
-    const visibleStep = document.querySelector('.wizard-step[style*="block"]');
-    if (visibleStep) {
-        return parseInt(visibleStep.dataset.step) || 1;
-    }
-    
-    return 1;
-}
-
-// Función para guardar en localStorage
-function saveToLocalStorage(data) {
-    try {
-        const key = `protexa_draft_${data.tour_id}`;
-        localStorage.setItem(key, JSON.stringify(data));
-        console.log(`💾 Guardado en localStorage: ${key}`);
-    } catch (error) {
-        console.error('❌ Error guardando en localStorage:', error);
-    }
-}
-
-// Función para mostrar loading en botones
-function showButtonLoading(button) {
-    if (!button) return;
-    
-    const text = button.querySelector('.btn-text');
-    const loading = button.querySelector('.btn-loading');
-    
-    if (text) text.style.display = 'none';
-    if (loading) loading.style.display = 'flex';
-    
-    button.disabled = true;
-}
-
-// Función para ocultar loading en botones
-function hideButtonLoading(button) {
-    if (!button) return;
-    
-    const text = button.querySelector('.btn-text');
-    const loading = button.querySelector('.btn-loading');
-    
-    if (text) text.style.display = 'block';
-    if (loading) loading.style.display = 'none';
-    
-    button.disabled = false;
-}
-
-// Event listener para el botón de guardar borrador
-document.addEventListener('DOMContentLoaded', function() {
-    const saveDraftBtn = document.querySelector('.nav-save-draft');
-    if (saveDraftBtn) {
-        saveDraftBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            saveDraft();
-        });
-    }
-    
-    // Auto-guardado cada 2 minutos si hay cambios
-    let lastSaveData = null;
-    setInterval(() => {
-        const currentData = JSON.stringify(collectFormData());
-        if (currentData !== lastSaveData && currentData !== '{}') {
-            console.log('🔄 Auto-guardado iniciado...');
-            saveDraft();
-            lastSaveData = currentData;
-        }
-    }, 120000); // 2 minutos
-});
-
-// Función para mostrar notificaciones toast
+// Global Utility Functions
 function showToast(message, type = 'info', duration = 4000) {
     const container = document.getElementById('toast-container') || createToastContainer();
     const toast = document.createElement('div');
@@ -1262,7 +1082,6 @@ function showToast(message, type = 'info', duration = 4000) {
     }, duration);
 }
 
-// Crear contenedor de toasts si no existe
 function createToastContainer() {
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -1273,3 +1092,250 @@ function createToastContainer() {
     }
     return container;
 }
+
+function showLoading(message = 'Cargando...') {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        const text = overlay.querySelector('p');
+        if (text) text.textContent = message;
+        overlay.style.display = 'flex';
+    }
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+}
+
+// Menu Functions
+function toggleMenu() {
+    const menu = document.getElementById('headerMenu');
+    if (!menu) return;
+    
+    const isOpen = menu.classList.contains('active');
+    
+    if (isOpen) {
+        menu.classList.remove('active');
+        document.removeEventListener('click', closeMenuOnOutsideClick);
+    } else {
+        menu.classList.add('active');
+        setTimeout(() => {
+            document.addEventListener('click', closeMenuOnOutsideClick);
+        }, 10);
+    }
+}
+
+function closeMenuOnOutsideClick(event) {
+    const menu = document.getElementById('headerMenu');
+    const toggle = document.querySelector('.menu-toggle');
+    
+    if (menu && toggle && !menu.contains(event.target) && !toggle.contains(event.target)) {
+        menu.classList.remove('active');
+        document.removeEventListener('click', closeMenuOnOutsideClick);
+    }
+}
+
+function initializeMenu() {
+    // Marcar item activo del menú
+    const currentPage = window.location.pathname.split('/').pop();
+    const menuItems = document.querySelectorAll('.menu-item');
+    
+    menuItems.forEach(item => {
+        const href = item.getAttribute('href');
+        if (href && href.includes(currentPage)) {
+            item.classList.add('active');
+        }
+    });
+}
+
+// PWA Functions
+let deferredPrompt;
+
+function showInstallBanner() {
+    if (deferredPrompt && !localStorage.getItem('pwa-dismissed-' + new Date().toDateString())) {
+        showToast(
+            '¡Instala Protexa Seguro para acceso rápido! <button onclick="installPWA()" style="margin-left: 10px; padding: 2px 8px; border: none; background: white; border-radius: 3px;">Instalar</button>',
+            'info',
+            8000
+        );
+    }
+}
+
+async function installPWA() {
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        
+        if (outcome === 'accepted') {
+            showToast('¡Aplicación instalada correctamente!', 'success');
+        } else {
+            localStorage.setItem('pwa-dismissed-' + new Date().toDateString(), 'true');
+        }
+    }
+}
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 Protexa Seguro App iniciando...');
+    
+    // Only initialize wizard on recorrido page
+    if (document.querySelector('.wizard-container')) {
+        console.log('📋 Inicializando wizard de recorrido...');
+        window.protexaApp = new ProtexaApp();
+    }
+
+    // Initialize PWA features
+    if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+        navigator.serviceWorker.register('sw.js')
+            .then(registration => {
+                console.log('SW registered:', registration);
+                
+                // Verificar actualizaciones cada 5 minutos
+                setInterval(() => {
+                    registration.update().catch(error => {
+                        console.warn('Error verificando actualizaciones del SW:', error);
+                    });
+                }, 300000);
+            })
+            .catch(error => {
+                console.log('SW registration failed:', error);
+            });
+    }
+
+    // Handle beforeinstallprompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        
+        // Solo mostrar prompt en páginas principales
+        const currentPage = window.location.pathname.split('/').pop();
+        const mainPages = ['index.php', 'dashboard.php', ''];
+        
+        if (mainPages.includes(currentPage)) {
+            setTimeout(showInstallBanner, 10000); // Mostrar después de 10 segundos
+        }
+    });
+
+    // Initialize menu
+    initializeMenu();
+    
+    // Connection status
+    window.addEventListener('online', () => {
+        const indicator = document.getElementById('offline-indicator');
+        if (indicator) indicator.style.display = 'none';
+        showToast('Conexión restaurada', 'success');
+    });
+
+    window.addEventListener('offline', () => {
+        const indicator = document.getElementById('offline-indicator');
+        if (indicator) indicator.style.display = 'flex';
+        showToast('Sin conexión - Trabajando offline', 'warning');
+    });
+
+    // Verificar estado inicial de conexión
+    if (!navigator.onLine) {
+        const indicator = document.getElementById('offline-indicator');
+        if (indicator) indicator.style.display = 'flex';
+    }
+
+    // Mostrar notificación de bienvenida si es primera visita al dashboard
+    if (window.location.pathname.includes('dashboard.php') && !localStorage.getItem('dashboard_visited')) {
+        setTimeout(() => {
+            showToast('¡Bienvenido a Protexa Seguro! Selecciona un tipo de recorrido para comenzar.', 'info', 6000);
+            localStorage.setItem('dashboard_visited', 'true');
+        }, 1000);
+    }
+
+    console.log('✅ Protexa Seguro App inicializada correctamente');
+});
+
+// Funciones adicionales para eventos específicos
+
+// Event listener para el botón de guardar borrador (si no está en wizard)
+document.addEventListener('click', function(e) {
+    if (e.target.matches('.nav-save-draft') && !window.protexaApp) {
+        e.preventDefault();
+        
+        // Crear instancia temporal para guardar
+        const tempApp = new ProtexaApp();
+        tempApp.saveDraft();
+    }
+});
+
+// Auto-resize textareas globalmente
+document.addEventListener('input', function(e) {
+    if (e.target.matches('textarea')) {
+        e.target.style.height = 'auto';
+        e.target.style.height = e.target.scrollHeight + 'px';
+    }
+});
+
+// Manejar formularios de configuración de recorrido
+document.addEventListener('submit', function(e) {
+    if (e.target.matches('#tour-config-form')) {
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            const btnText = submitBtn.querySelector('.btn-text');
+            const btnLoading = submitBtn.querySelector('.btn-loading');
+            
+            if (btnText) btnText.style.display = 'none';
+            if (btnLoading) btnLoading.style.display = 'flex';
+            submitBtn.disabled = true;
+        }
+    }
+});
+
+// Cerrar modales con Escape
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        // Cerrar cualquier modal visible
+        const modals = document.querySelectorAll('.modal[style*="flex"]');
+        modals.forEach(modal => {
+            modal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        });
+        
+        // Cerrar menú si está abierto
+        const menu = document.getElementById('headerMenu');
+        if (menu && menu.classList.contains('active')) {
+            menu.classList.remove('active');
+            document.removeEventListener('click', closeMenuOnOutsideClick);
+        }
+    }
+});
+
+// Debug helpers
+window.ProtexaDebug = {
+    clearAllData() {
+        localStorage.clear();
+        sessionStorage.clear();
+        console.log('✅ Todos los datos locales eliminados');
+    },
+    
+    showStoredData() {
+        console.log('📊 Datos almacenados:');
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.includes('protexa')) {
+                console.log(key, JSON.parse(localStorage.getItem(key)));
+            }
+        }
+    },
+    
+    testAPI() {
+        fetch('api/ping.php')
+            .then(response => response.json())
+            .then(data => console.log('🌐 API Test:', data))
+            .catch(error => console.error('❌ API Error:', error));
+    }
+};
+
+// Export for global access
+window.ProtexaApp = ProtexaApp;
+window.CameraHelper = CameraHelper;
+window.StorageHelper = StorageHelper;
+window.FormHelper = FormHelper;
+window.NetworkHelper = NetworkHelper;

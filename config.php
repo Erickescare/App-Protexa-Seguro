@@ -12,7 +12,7 @@ define('TABLE_PREFIX', 'ps_');
 
 // Configuración de la aplicación
 define('APP_NAME', 'Protexa Seguro');
-define('APP_VERSION', '1.0.3');
+define('APP_VERSION', '1.0.65');
 define('BASE_URL', 'https://www.universidadprotexa.mx/app-protexa-seguro/');
 
 // Rutas importantes
