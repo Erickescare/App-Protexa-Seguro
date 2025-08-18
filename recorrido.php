@@ -1,5 +1,5 @@
 <?php
-// app-protexa-seguro/recorrido.php
+// app-protexa-seguro/recorrido.php - VERSION MEJORADA
 require_once 'config.php';
 setSecurityHeaders();
 
@@ -83,7 +83,7 @@ try {
 
 // Determinar si es un recorrido de emergencia
 $is_emergency = $recorrido['tour_type'] === 'emergency';
-$total_steps = count($categorias);
+$total_steps = count($categorias) + 1; // +1 para la sección de fotos/resumen
 ?>
 <!DOCTYPE html>
 <html lang="es-MX">
@@ -116,16 +116,24 @@ $total_steps = count($categorias);
         .wizard-title {
             color: #dc2626;
         }
+        .emergency-mode .category-header {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+        }
         <?php endif; ?>
     </style>
 </head>
-<body>
+<body <?php echo $is_emergency ? 'class="emergency-mode"' : ''; ?>>
     <div class="app-container">
         <!-- Header -->
         <header class="app-header">
-            <div class="logo-container">
-                <img src="assets/images/logo.png" alt="<?php echo APP_NAME; ?>" class="app-logo" onerror="this.style.display='none'">
-                <h1 class="app-title"><?php echo PWA_SHORT_NAME; ?></h1>
+            <div class="header-content">
+                <div class="header-back">
+                    <a href="dashboard.php" class="back-button">← Dashboard</a>
+                </div>
+                <div class="logo-container">
+                    <img src="assets/images/logo.png" alt="<?php echo APP_NAME; ?>" class="app-logo" onerror="this.style.display='none'">
+                    <h1 class="app-title"><?php echo PWA_SHORT_NAME; ?></h1>
+                </div>
             </div>
         </header>
 
@@ -188,8 +196,9 @@ $total_steps = count($categorias);
             <form id="tour-form" class="tour-form">
                 <input type="hidden" name="tour_id" value="<?php echo $tour_id; ?>">
                 
+                <?php $step_index = 1; ?>
                 <?php foreach ($categorias as $cat_index => $categoria): ?>
-                <div class="wizard-step" data-step="<?php echo $cat_index; ?>" style="<?php echo $cat_index === 1 ? 'display: block;' : 'display: none;'; ?>">
+                <div class="wizard-step" data-step="<?php echo $step_index; ?>" style="<?php echo $step_index === 1 ? 'display: block;' : 'display: none;'; ?>">
                     <div class="category-header">
                         <h2><?php echo $categoria['id']; ?>. <?php echo htmlspecialchars($categoria['nombre']); ?></h2>
                         <p>Responde todas las preguntas de esta categoría</p>
@@ -244,33 +253,6 @@ $total_steps = count($categorias);
                                     </label>
                                 </div>
                             </div>
-                            
-                            <!-- Photo Upload -->
-                            <div class="photo-upload" data-question-id="<?php echo $pregunta_key; ?>">
-                                <input type="file" 
-                                       id="photo_<?php echo $pregunta_key; ?>" 
-                                       name="photos[<?php echo $pregunta_key; ?>][]" 
-                                       accept="image/*" 
-                                       multiple 
-                                       capture="environment"
-                                       data-question-id="<?php echo $pregunta_key; ?>">
-                                <div class="photo-upload-icon">📷</div>
-                                <p>Toca para agregar fotos</p>
-                                <small>Máximo 5 fotos por pregunta</small>
-                                
-                                <div class="photo-preview" data-question-id="<?php echo $pregunta_key; ?>">
-                                    <!-- Photos will be added here by JavaScript -->
-                                </div>
-                            </div>
-                            
-                            <!-- Comments -->
-                            <div class="comments-section">
-                                <label for="comment_<?php echo $pregunta_key; ?>">Comentarios (opcional)</label>
-                                <textarea id="comment_<?php echo $pregunta_key; ?>" 
-                                          name="comments[<?php echo $pregunta_key; ?>]" 
-                                          placeholder="Agrega observaciones o detalles adicionales..."
-                                          rows="3"><?php echo $respuesta_existente ? htmlspecialchars($respuesta_existente['comentarios']) : ''; ?></textarea>
-                            </div>
                         </div>
                     <?php endforeach; ?>
                     
@@ -282,7 +264,40 @@ $total_steps = count($categorias);
                                   rows="4"></textarea>
                     </div>
                 </div>
+                <?php $step_index++; ?>
                 <?php endforeach; ?>
+                
+                <!-- Fotos y Adjuntos Step -->
+                <div class="wizard-step" data-step="<?php echo $step_index; ?>" style="display: none;">
+                    <div class="category-header">
+                        <h2>📷 Fotos y Evidencias</h2>
+                        <p>Agrega fotos que documenten los hallazgos encontrados</p>
+                    </div>
+                    
+                    <!-- Photo Upload por cada categoría que tuvo respuestas "No" -->
+                    <?php foreach ($categorias as $categoria): ?>
+                    <div class="photo-section">
+                        <h3><?php echo htmlspecialchars($categoria['nombre']); ?></h3>
+                        <div class="photo-upload" data-category-id="<?php echo $categoria['id']; ?>">
+                            <input type="file" 
+                                   id="photo_cat_<?php echo $categoria['id']; ?>" 
+                                   name="photos[categoria_<?php echo $categoria['id']; ?>][]" 
+                                   accept="image/*" 
+                                   multiple 
+                                   capture="environment"
+                                   data-category-id="<?php echo $categoria['id']; ?>">
+                            <div class="photo-upload-icon">📷</div>
+                            <p>Toca para agregar fotos de esta categoría</p>
+                            <small>Máximo 5 fotos por categoría</small>
+                            
+                            <div class="photo-preview" data-category-id="<?php echo $categoria['id']; ?>">
+                                <!-- Photos will be added here by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php $step_index++; ?>
                 
                 <!-- Summary Step -->
                 <div class="wizard-step wizard-summary" style="display: none;">
@@ -365,6 +380,10 @@ $total_steps = count($categorias);
                 
                 <button type="button" class="btn btn-outline nav-save-draft">
                     <span class="btn-text">💾 Guardar Borrador</span>
+                    <span class="btn-loading" style="display: none;">
+                        <span class="spinner"></span>
+                        Guardando...
+                    </span>
                 </button>
                 
                 <button type="button" class="btn btn-primary nav-next">
@@ -398,28 +417,6 @@ $total_steps = count($categorias);
         <span class="offline-text">Sin conexión - Trabajando offline</span>
     </div>
 
-    <!-- Camera Modal -->
-    <div id="camera-modal" class="modal" style="display: none;">
-        <div class="modal-content camera-modal-content">
-            <div class="modal-header">
-                <h2>Tomar Foto</h2>
-                <button type="button" class="modal-close" onclick="closeCamera()">&times;</button>
-            </div>
-            
-            <div class="camera-container">
-                <video id="camera-video" autoplay playsinline></video>
-                <div class="camera-controls">
-                    <button type="button" class="btn btn-primary" onclick="capturePhoto()">
-                        📷 Capturar
-                    </button>
-                    <button type="button" class="btn btn-secondary" onclick="closeCamera()">
-                        Cancelar
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Scripts -->
     <script>
         // Pass PHP data to JavaScript
@@ -428,7 +425,9 @@ $total_steps = count($categorias);
             type: '<?php echo $recorrido['tour_type']; ?>',
             totalSteps: <?php echo $total_steps; ?>,
             isEmergency: <?php echo $is_emergency ? 'true' : 'false'; ?>,
-            categories: <?php echo json_encode(array_values($categorias)); ?>
+            categories: <?php echo json_encode(array_values($categorias)); ?>,
+            userId: <?php echo $user['id']; ?>,
+            userName: '<?php echo addslashes($user['display_name']); ?>'
         };
     </script>
     <script src="assets/js/app.js"></script>

@@ -988,3 +988,288 @@ window.CameraHelper = CameraHelper;
 window.StorageHelper = StorageHelper;
 window.FormHelper = FormHelper;
 window.NetworkHelper = NetworkHelper;
+
+// Parte del app.js que maneja el guardado de borradores - VERSIÓN CORREGIDA
+
+// Función para guardar borrador
+async function saveDraft() {
+    console.log('🔄 Iniciando guardado de borrador...');
+    
+    if (!window.tourData || !window.tourData.id) {
+        console.error('❌ No se encontró tour_id');
+        showToast('Error: No se pudo identificar el recorrido', 'error');
+        return false;
+    }
+    
+    const tourId = window.tourData.id;
+    console.log(`📝 Guardando borrador para tour_id: ${tourId}`);
+    
+    // Mostrar loading en el botón
+    const saveBtn = document.querySelector('.nav-save-draft');
+    if (saveBtn) {
+        showButtonLoading(saveBtn);
+    }
+    
+    try {
+        // Recopilar datos del formulario actual
+        const formData = collectFormData();
+        console.log('📊 Datos recopilados:', formData);
+        
+        // Preparar payload para la API
+        const payload = {
+            tour_id: tourId,
+            tourData: formData,
+            isDraft: true,
+            currentStep: window.protexaApp ? window.protexaApp.currentStep : 1,
+            timestamp: new Date().toISOString()
+        };
+        
+        console.log('📤 Enviando payload:', payload);
+        
+        // Hacer request a la API
+        const response = await fetch('api/save-progress.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'same-origin', // Importante para cookies de sesión
+            body: JSON.stringify(payload)
+        });
+        
+        console.log(`📡 Response status: ${response.status}`);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ Error response:', errorText);
+            
+            if (response.status === 401) {
+                showToast('Sesión expirada. Redirigiendo al login...', 'warning');
+                setTimeout(() => {
+                    window.location.href = 'index.php';
+                }, 2000);
+                return false;
+            }
+            
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('✅ Respuesta exitosa:', result);
+        
+        if (result.success) {
+            showToast(result.message || 'Borrador guardado correctamente', 'success');
+            
+            // Guardar también en localStorage como backup
+            saveToLocalStorage(payload);
+            
+            // Opcional: redirigir a página de confirmación
+            if (result.redirect_url) {
+                setTimeout(() => {
+                    window.location.href = result.redirect_url;
+                }, 1500);
+            }
+            
+            return true;
+        } else {
+            throw new Error(result.message || 'Error desconocido al guardar');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error guardando borrador:', error);
+        
+        // Guardar en localStorage como fallback
+        const fallbackData = {
+            tour_id: tourId,
+            tourData: collectFormData(),
+            isDraft: true,
+            timestamp: new Date().toISOString(),
+            savedOffline: true
+        };
+        
+        saveToLocalStorage(fallbackData);
+        
+        if (navigator.onLine) {
+            showToast('Error al guardar en servidor. Guardado localmente.', 'warning');
+        } else {
+            showToast('Sin conexión. Guardado localmente.', 'info');
+        }
+        
+        return false;
+        
+    } finally {
+        // Ocultar loading
+        if (saveBtn) {
+            hideButtonLoading(saveBtn);
+        }
+    }
+}
+
+// Función para recopilar datos del formulario
+function collectFormData() {
+    const formData = {};
+    const form = document.getElementById('tour-form');
+    
+    if (!form) {
+        console.warn('⚠️ No se encontró el formulario');
+        return formData;
+    }
+    
+    // Obtener todas las respuestas de radio buttons
+    const radioButtons = form.querySelectorAll('input[type="radio"]:checked');
+    radioButtons.forEach(radio => {
+        const stepKey = `step_${getCurrentStep()}`;
+        if (!formData[stepKey]) {
+            formData[stepKey] = {};
+        }
+        formData[stepKey][radio.name] = radio.value;
+    });
+    
+    // Obtener comentarios de categorías
+    const textareas = form.querySelectorAll('textarea[name^="category_comments"]');
+    textareas.forEach(textarea => {
+        if (textarea.value.trim()) {
+            const stepKey = `step_${getCurrentStep()}`;
+            if (!formData[stepKey]) {
+                formData[stepKey] = {};
+            }
+            formData[stepKey][textarea.name] = textarea.value;
+        }
+    });
+    
+    // Obtener comentarios finales
+    const finalComments = form.querySelector('textarea[name="final_comments"]');
+    if (finalComments && finalComments.value.trim()) {
+        formData['final_comments'] = finalComments.value;
+    }
+    
+    // Obtener prioridad crítica
+    const priorityLevel = form.querySelector('input[name="priority_level"]:checked');
+    if (priorityLevel) {
+        formData['priority_level'] = priorityLevel.value;
+    }
+    
+    // Obtener descripción crítica
+    const criticalDesc = form.querySelector('textarea[name="critical_description"]');
+    if (criticalDesc && criticalDesc.value.trim()) {
+        formData['critical_description'] = criticalDesc.value;
+    }
+    
+    console.log('📋 Form data collected:', formData);
+    return formData;
+}
+
+// Función para obtener el paso actual
+function getCurrentStep() {
+    if (window.protexaApp && window.protexaApp.currentStep) {
+        return window.protexaApp.currentStep;
+    }
+    
+    // Fallback: encontrar el paso visible
+    const visibleStep = document.querySelector('.wizard-step[style*="block"]');
+    if (visibleStep) {
+        return parseInt(visibleStep.dataset.step) || 1;
+    }
+    
+    return 1;
+}
+
+// Función para guardar en localStorage
+function saveToLocalStorage(data) {
+    try {
+        const key = `protexa_draft_${data.tour_id}`;
+        localStorage.setItem(key, JSON.stringify(data));
+        console.log(`💾 Guardado en localStorage: ${key}`);
+    } catch (error) {
+        console.error('❌ Error guardando en localStorage:', error);
+    }
+}
+
+// Función para mostrar loading en botones
+function showButtonLoading(button) {
+    if (!button) return;
+    
+    const text = button.querySelector('.btn-text');
+    const loading = button.querySelector('.btn-loading');
+    
+    if (text) text.style.display = 'none';
+    if (loading) loading.style.display = 'flex';
+    
+    button.disabled = true;
+}
+
+// Función para ocultar loading en botones
+function hideButtonLoading(button) {
+    if (!button) return;
+    
+    const text = button.querySelector('.btn-text');
+    const loading = button.querySelector('.btn-loading');
+    
+    if (text) text.style.display = 'block';
+    if (loading) loading.style.display = 'none';
+    
+    button.disabled = false;
+}
+
+// Event listener para el botón de guardar borrador
+document.addEventListener('DOMContentLoaded', function() {
+    const saveDraftBtn = document.querySelector('.nav-save-draft');
+    if (saveDraftBtn) {
+        saveDraftBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            saveDraft();
+        });
+    }
+    
+    // Auto-guardado cada 2 minutos si hay cambios
+    let lastSaveData = null;
+    setInterval(() => {
+        const currentData = JSON.stringify(collectFormData());
+        if (currentData !== lastSaveData && currentData !== '{}') {
+            console.log('🔄 Auto-guardado iniciado...');
+            saveDraft();
+            lastSaveData = currentData;
+        }
+    }, 120000); // 2 minutos
+});
+
+// Función para mostrar notificaciones toast
+function showToast(message, type = 'info', duration = 4000) {
+    const container = document.getElementById('toast-container') || createToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    const icon = {
+        'success': '✅',
+        'error': '❌', 
+        'warning': '⚠️',
+        'info': 'ℹ️'
+    };
+    
+    toast.innerHTML = `
+        <span class="toast-icon">${icon[type] || icon.info}</span>
+        <span class="toast-message">${message}</span>
+        <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Auto remove
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.remove();
+        }
+    }, duration);
+}
+
+// Crear contenedor de toasts si no existe
+function createToastContainer() {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+    return container;
+}
