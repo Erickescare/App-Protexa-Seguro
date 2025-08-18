@@ -1,5 +1,5 @@
 <?php
-// app-protexa-seguro/dashboard.php
+// app-protexa-seguro/dashboard.php - VERSION CORREGIDA
 require_once 'config.php';
 setSecurityHeaders();
 
@@ -21,43 +21,79 @@ $action = $_GET['action'] ?? '';
 $notification = '';
 $notification_type = '';
 
-// Si se selecciona un tipo de recorrido
+// ARREGLO: Si se selecciona un tipo de recorrido
 if ($_POST && isset($_POST['start_tour'])) {
-    $tour_type = $_POST['tour_type'];
-    $location = $_POST['location'] ?? '';
+    $tour_type = $_POST['tour_type'] ?? '';
+    $location = trim($_POST['location'] ?? '');
     $division = $_POST['division'] ?? '';
     $business = $_POST['business'] ?? '';
     $reason = $_POST['reason'] ?? '';
     
-    // Crear nuevo recorrido en la base de datos
-    try {
-        $pdo = getDBConnection();
-        $stmt = $pdo->prepare("
-            INSERT INTO " . getTableName('recorridos') . " (
-                user_id, user_name, tour_type, location, division, 
-                business, reason, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', NOW())
-        ");
-        
-        $stmt->execute([
-            $user['id'], 
-            $user['display_name'], 
-            $tour_type, 
-            $location, 
-            $division, 
-            $business, 
-            $reason
-        ]);
-        
-        $tour_id = $pdo->lastInsertId();
-        
-        // Redirigir al formulario de recorrido
-        header("Location: recorrido.php?id={$tour_id}");
-        exit;
-        
-    } catch (Exception $e) {
-        $notification = 'Error al crear el recorrido: ' . $e->getMessage();
+    // Validación básica
+    if (empty($tour_type) || empty($location) || empty($division) || empty($business) || empty($reason)) {
+        $notification = 'Por favor completa todos los campos requeridos';
         $notification_type = 'error';
+    } else {
+        // Crear nuevo recorrido en la base de datos
+        try {
+            $pdo = getDBConnection();
+            
+            // Insertar nuevo recorrido
+            $stmt = $pdo->prepare("
+                INSERT INTO " . getTableName('recorridos') . " (
+                    user_id, user_name, tour_type, location, division, 
+                    business, reason, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', NOW(), NOW())
+            ");
+            
+            $stmt->execute([
+                $user['id'], 
+                $user['display_name'], 
+                $tour_type, 
+                $location, 
+                $division, 
+                $business, 
+                $reason
+            ]);
+            
+            $tour_id = $pdo->lastInsertId();
+            
+            if ($tour_id) {
+                // Log de auditoría
+                $log_stmt = $pdo->prepare("
+                    INSERT INTO " . getTableName('logs_sistema') . " 
+                    (user_id, action, table_name, record_id, new_values, ip_address)
+                    VALUES (?, 'CREATE_TOUR', ?, ?, ?, ?)
+                ");
+                
+                $log_data = json_encode([
+                    'tour_type' => $tour_type,
+                    'location' => $location,
+                    'division' => $division,
+                    'business' => $business,
+                    'reason' => $reason
+                ]);
+                
+                $log_stmt->execute([
+                    $user['id'],
+                    getTableName('recorridos'),
+                    $tour_id,
+                    $log_data,
+                    $_SERVER['REMOTE_ADDR'] ?? ''
+                ]);
+                
+                // REDIRECCIÓN CORRECTA al formulario de recorrido
+                header("Location: recorrido.php?id={$tour_id}");
+                exit;
+            } else {
+                throw new Exception('No se pudo obtener el ID del recorrido creado');
+            }
+            
+        } catch (Exception $e) {
+            error_log("Error creando recorrido: " . $e->getMessage());
+            $notification = 'Error al crear el recorrido. Por favor intenta de nuevo.';
+            $notification_type = 'error';
+        }
     }
 }
 
@@ -106,6 +142,7 @@ try {
     $completados_total = $stmt->fetchColumn();
     
 } catch (Exception $e) {
+    error_log("Error obteniendo estadísticas: " . $e->getMessage());
     $stats_mes = ['total_mes' => 0];
     $ultimo_recorrido = null;
     $borradores_pendientes = 0;
@@ -254,8 +291,9 @@ include 'includes/header.php';
             <button type="button" class="modal-close" onclick="closeTourForm()">&times;</button>
         </div>
         
-        <form method="post" class="tour-form">
+        <form method="post" class="tour-form" id="tour-config-form">
             <input type="hidden" name="tour_type" id="tour_type" value="">
+            <input type="hidden" name="start_tour" value="1">
             
             <div class="form-group">
                 <label for="location">Ubicación/Sitio *</label>
@@ -302,7 +340,7 @@ include 'includes/header.php';
                 <button type="button" class="btn btn-secondary" onclick="closeTourForm()">
                     Cancelar
                 </button>
-                <button type="submit" name="start_tour" class="btn btn-primary">
+                <button type="submit" class="btn btn-primary" id="start-tour-btn">
                     <span class="btn-text">Iniciar Recorrido</span>
                     <span class="btn-loading" style="display: none;">
                         <span class="spinner"></span>
@@ -364,7 +402,7 @@ $inline_scripts = "
         reasonSelect.innerHTML = '<option value=\"\">Seleccionar motivo...</option>';
         tourReasons[tourType].forEach(reason => {
             const option = document.createElement('option');
-            option.value = reason.toLowerCase().replace(/\s+/g, '_');
+            option.value = reason.toLowerCase().replace(/\\s+/g, '_');
             option.textContent = reason;
             reasonSelect.appendChild(option);
         });
@@ -417,12 +455,12 @@ $inline_scripts = "
         }
     });
 
-    // Validación en tiempo real
+    // Validación y manejo del formulario
     document.addEventListener('DOMContentLoaded', function() {
-        const form = document.querySelector('.tour-form');
-        const submitBtn = form.querySelector('button[type=\"submit\"]');
+        const form = document.getElementById('tour-config-form');
+        const submitBtn = document.getElementById('start-tour-btn');
         
-        // Validar formulario
+        // Validar formulario en tiempo real
         function validateForm() {
             const requiredFields = form.querySelectorAll('input[required], select[required]');
             let allValid = true;
@@ -445,9 +483,11 @@ $inline_scripts = "
         form.addEventListener('submit', function(e) {
             if (!validateForm()) {
                 e.preventDefault();
-                showToast('Por favor completa todos los campos requeridos', 'error');
+                alert('Por favor completa todos los campos requeridos');
                 return;
             }
+            
+            console.log('Enviando formulario...'); // Debug
             
             // Mostrar loading
             const btnText = submitBtn.querySelector('.btn-text');
@@ -456,6 +496,8 @@ $inline_scripts = "
             btnText.style.display = 'none';
             btnLoading.style.display = 'flex';
             submitBtn.disabled = true;
+            
+            // El formulario se enviará automáticamente via POST
         });
         
         // Auto-focus y acciones rápidas en URL
@@ -468,13 +510,8 @@ $inline_scripts = "
             showTourForm('emergency');
         }
         
-        // Mostrar notificación de bienvenida si es primera visita
-        if (!localStorage.getItem('dashboard_visited')) {
-            setTimeout(() => {
-                showToast('¡Bienvenido a Protexa Seguro! Selecciona un tipo de recorrido para comenzar.', 'info', 6000);
-                localStorage.setItem('dashboard_visited', 'true');
-            }, 1000);
-        }
+        // Validación inicial
+        setTimeout(validateForm, 100);
     });
 ";
 
